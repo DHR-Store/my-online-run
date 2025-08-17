@@ -1,69 +1,83 @@
+/ server.js
+
+// Import the required modules
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, 'user_data.json');
+const PORT = 3000;
 
-// Middleware
+// Enable CORS (Cross-Origin Resource Sharing)
+// This allows your frontend dashboard to make requests to this server.
 app.use(cors());
+
+// Enable the express server to parse JSON bodies from incoming requests
 app.use(express.json());
 
-// Check if data file exists, if not, create it
-if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, '{}', 'utf8');
-}
+// ------------------------------------
+// In-Memory Data Store
+// A simple object to store user data.
+// Key: userId
+// Value: { lastActive: Date, platform: string }
+// IMPORTANT: This data will be lost when the server restarts.
+// ------------------------------------
+const users = {};
 
-// Helper function to read user data
-const readUserData = () => {
-    try {
-        const data = fs.readFileSync(DATA_FILE, 'utf8');
-        return JSON.parse(data);
-    } catch (error) {
-        console.error('Error reading user data file:', error);
-        return {};
-    }
-};
+/**
+ * API Endpoint to "ping" the server and update a user's activity.
+ *
+ * @param {object} req.body - The request body should contain 'userId' and 'platform'.
+ * @returns {object} A JSON object with a success message.
+ */
+app.post('/ping', (req, res) => {
+  const { userId, platform } = req.body;
 
-// Helper function to write user data
-const writeUserData = (data) => {
-    try {
-        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
-    } catch (error) {
-        console.error('Error writing user data file:', error);
-    }
-};
+  if (!userId) {
+    return res.status(400).json({ message: 'Error: userId is required.' });
+  }
 
-// API endpoint to log user activity
-app.post('/api/user-ping', (req, res) => {
-    const { userId, platform } = req.body;
-    
-    // Check if the request is being received
-    console.log(`Received ping from userId: ${userId} on platform: ${platform}`);
+  // Update the user's last active timestamp and platform
+  users[userId] = {
+    lastActive: new Date(),
+    platform: platform || 'unknown'
+  };
 
-    if (!userId) {
-        return res.status(400).json({ error: 'userId is required' });
-    }
-
-    let users = readUserData();
-    users[userId] = {
-        lastSeen: new Date().toISOString(),
-        platform: platform || 'unknown'
-    };
-    writeUserData(users);
-
-    res.status(200).json({ message: 'User activity logged' });
+  console.log(`Ping received from userId: ${userId} on platform: ${platform}`);
+  res.status(200).json({ message: 'Ping successful.' });
 });
 
-// API endpoint to get all users
-app.get('/api/users', (req, res) => {
-    const users = readUserData();
-    res.status(200).json(users);
+/**
+ * API Endpoint to retrieve a list of currently online users.
+ *
+ * An "online" user is defined as someone who has "pinged" the server
+ * within the last 30 seconds.
+ *
+ * @returns {object} A JSON object containing the count of online users and a list of their details.
+ */
+app.get('/online-users', (req, res) => {
+  const now = new Date();
+  const onlineUsers = [];
+  const cutoffTime = now.getTime() - (30 * 1000); // 30 seconds ago
+
+  for (const userId in users) {
+    if (users[userId].lastActive.getTime() > cutoffTime) {
+      onlineUsers.push({
+        id: userId,
+        platform: users[userId].platform,
+        lastActive: users[userId].lastActive.toISOString()
+      });
+    }
+  }
+
+  console.log(`Sending response. ${onlineUsers.length} users online.`);
+  res.status(200).json({
+    onlineCount: onlineUsers.length,
+    users: onlineUsers,
+    totalUsers: Object.keys(users).length
+  });
 });
 
+// Start the server and listen on the defined port.
 app.listen(PORT, () => {
-    // Corrected console.log to show the full URL
-    console.log(`Server is running at http://localhost:${PORT}`);
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
